@@ -1,4 +1,8 @@
 # auth_routes.py
+import os
+from google.oauth2 import id_token
+from google.auth.transport import requests as grequests
+
 from datetime import datetime, timedelta
 import hashlib
 
