@@ -55,6 +55,57 @@ def signup(payload: SignUpIn, db: Session = Depends(get_db)):
     return user
 
 @router.post("/login", response_model=TokenPairOut)
+from schemas import GoogleIn
+
+@router.post("/google", response_model=TokenPairOut)
+def google_login(payload: GoogleIn, db: Session = Depends(get_db)):
+    client_id = os.getenv("GOOGLE_CLIENT_ID")
+    if not client_id:
+        raise HTTPException(status_code=500, detail="GOOGLE_CLIENT_ID missing")
+
+    try:
+        info = id_token.verify_oauth2_token(payload.credential, grequests.Request(), client_id)
+    except Exception:
+        raise HTTPException(status_code=401, detail="Invalid Google credential")
+
+    email = (info.get("email") or "").lower().strip()
+    name = info.get("name")
+    sub = info.get("sub")  # unique Google user id
+
+    if not email or not sub:
+        raise HTTPException(status_code=400, detail="Google token missing email/sub")
+
+    # find by google_sub, else by email
+    user = db.query(User).filter(User.google_sub == sub).first()
+    if not user:
+        user = db.query(User).filter(User.email == email).first()
+        if user:
+            user.google_sub = sub
+            user.auth_provider = "google"
+        else:
+            user = User(
+                email=email,
+                password_hash=None,
+                name=name,
+                is_active=True,
+            )
+            user.google_sub = sub
+            user.auth_provider = "google"
+            db.add(user)
+
+        db.commit()
+        db.refresh(user)
+
+    access = create_access_token(subject=str(user.id))
+    refresh = create_refresh_token(subject=str(user.id))
+
+    token_hash = _hash_token(refresh)
+    expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_DAYS)
+    db.add(RefreshSession(user_id=user.id, token_hash=token_hash, expires_at=expires_at, revoked=False))
+    db.commit()
+
+    return TokenPairOut(access_token=access, refresh_token=refresh)
+
 def login(payload: LoginIn, db: Session = Depends(get_db)):
     email = payload.email.lower().strip()
     user = db.query(User).filter(User.email == email).first()
