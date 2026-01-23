@@ -3,6 +3,9 @@ from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime
 
+class GoogleIn(BaseModel):
+    credential: str
+    
 class SignUpIn(BaseModel):
     email: EmailStr
     password: str
