@@ -12,7 +12,7 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 from database import get_db
 from models import User, RefreshSession, Bookmark
-from schemas import SignUpIn, LoginIn, UserOut, TokenPairOut, RefreshIn, BookmarkIn, BookmarkOut
+from schemas import SignUpIn, LoginIn, UserOut, TokenPairOut, RefreshIn, BookmarkIn, BookmarkOut, GoogleIn
 from auth import (
     hash_password, verify_password,
     create_access_token, create_refresh_token,
@@ -55,7 +55,22 @@ def signup(payload: SignUpIn, db: Session = Depends(get_db)):
     return user
 
 @router.post("/login", response_model=TokenPairOut)
-from schemas import GoogleIn
+def login(payload: LoginIn, db: Session = Depends(get_db)):
+    email = payload.email.lower().strip()
+    user = db.query(User).filter(User.email == email).first()
+    if not user or not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    access = create_access_token(subject=str(user.id))
+    refresh = create_refresh_token(subject=str(user.id))
+
+    token_hash = _hash_token(refresh)
+    expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_DAYS)
+
+    db.add(RefreshSession(user_id=user.id, token_hash=token_hash, expires_at=expires_at, revoked=False))
+    db.commit()
+
+    return TokenPairOut(access_token=access, refresh_token=refresh)
 
 @router.post("/google", response_model=TokenPairOut)
 def google_login(payload: GoogleIn, db: Session = Depends(get_db)):
@@ -101,23 +116,6 @@ def google_login(payload: GoogleIn, db: Session = Depends(get_db)):
 
     token_hash = _hash_token(refresh)
     expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_DAYS)
-    db.add(RefreshSession(user_id=user.id, token_hash=token_hash, expires_at=expires_at, revoked=False))
-    db.commit()
-
-    return TokenPairOut(access_token=access, refresh_token=refresh)
-
-def login(payload: LoginIn, db: Session = Depends(get_db)):
-    email = payload.email.lower().strip()
-    user = db.query(User).filter(User.email == email).first()
-    if not user or not verify_password(payload.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
-
-    access = create_access_token(subject=str(user.id))
-    refresh = create_refresh_token(subject=str(user.id))
-
-    token_hash = _hash_token(refresh)
-    expires_at = datetime.utcnow() + timedelta(days=REFRESH_TOKEN_DAYS)
-
     db.add(RefreshSession(user_id=user.id, token_hash=token_hash, expires_at=expires_at, revoked=False))
     db.commit()
 
